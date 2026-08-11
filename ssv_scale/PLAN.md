@@ -1,92 +1,93 @@
-# Experiment B · 记忆库规模 × 统计代理偏差
+# Experiment D · 规模作自变量（结构价值 vs 记忆库规模）
 
 > Fork of `xiaowu0162/LongMemEval` · 实验负责：Tao
 > 上游 commit 见 `git log`。本目录是**新增**的，不改动上游任何文件。
+>
+> ⚠️ **本实验是 Experiment C（结构价值主实验）的延伸，不独立。**
+> 主实验在 `litaohz/graphiti` 分支 `ssv/structure-value` 的 `ssv_structure/`。
+> 宿主是 **Graphiti**；本 repo 提供**数据与规模档位**。
 
 ## 0. 一句话
 
-把**记忆库规模**当自变量（oracle → s → m），用反事实 φ 当 ground truth，
-测量**廉价统计代理**（召回频次 / 保鲜度 / 命中率）的偏差**随库增大如何变化**。
+LongMemEval 的三档（`oracle` / `s` / `m`）**同源同题，只有干扰 session 数不同**
+⇒ 记忆库规模是一个**干净的自变量**。
+测**结构价值随库规模的变化曲线** —— ⭐ **这条曲线本身就是卖点。**
 
-## 1. 核心主张
+## 1. 核心假设
 
-统计信号**便宜、可在线持续更新、但有偏**；反事实 φ **无偏、能表达集合级干扰、但贵**。
+> **结构价值随库变大而增长。小库上图结构是纯开销，大库上才回本。**
 
-> **真问题：统计信号在多大程度上能逼近反事实价值？偏差有多大？什么条件下能替代？**
+形式化：设 `Δ₁ = φ(L1) − φ(L0)`（图结构价值）、`Δ₂ = φ(L2) − φ(L1)`（层级价值），
+则假设为 **`Δ₁`、`Δ₂` 随库规模单调递增，且在小规模处可能为负**。
 
-🔴 **统计代理的硬伤：召回频次由检索器决定，不由价值决定。**
-检索器用相似度 ⇒「常被召回」≈「embedding 位置居中、跟很多 query 都沾边」= **曝光偏差不是效用**。
-泛而无用的记忆频次高；关键但冷门的记忆频次为零。
-更糟的是会**自我实现**：高频 → 判定有价值 → 排序靠前 → 更高频
-（= Jiang et al. `1902.10730` 推荐系统 degenerate feedback loop，**该线在 LLM agent memory 文献零引用**）。
+⭐ **为什么这个结论非平凡**：
+如果只报「加了结构分数更高」，审稿人会说「这就是 GraphRAG 消融，早有人做了」。
+**真正非平凡的是那个「负→正」的穿越点**：
 
-⭐ **这把工作从「又发明一个打分」变成「校准一个已有的打分」，不易被说成方法找问题。
-而且自带可做的实验 —— 没人做过这个校准，因为没人有 φ。**
+> **建 Community 在小库上是负价值**（占预算、引入摘要误差），
+> **过了某个库大小才转正 —— 而现有系统全都是无条件建。**
 
-⚠️ **「无偏」必须加限定语**：Shapley 消除的是**曝光偏差**（只看在场/不在场，检索器污染不到）。
-但 φ 完全取决于所选效用函数与任务集合 ⇒ 准确说法是「**相对于给定任务分布无偏**」，
-不是「客观真值」。**不写这个限定，第一个审稿人就会问「相对于什么无偏」。**
+⇒ 落点是：**结构不是免费的，它有代价，而代价什么时候被覆盖没人量过。**
 
-## 2. 为什么选这个数据（已核实，非转述）
+## 2. 为什么这个数据能当自变量（已实测，非转述）
 
-**实测 `longmemeval_oracle`（15MB，500 题）证据 session 数分布**：
+**`longmemeval_oracle`（15MB，500 题）证据 session 数分布**：
 
 | 类型 | 题数 | 证据 session 数分布 |
 |---|---|---|
-| **knowledge-update** | **78** | ⭐ **`{2:78}` 全部恰好 2 个，无一例外** |
-| **multi-session** | 133 | `{2:84, 3:26, 4:17, 5:6}` ← 49 题 ≥3 |
+| **multi-session** | **133** | **`{2:84, 3:26, 4:17, 5:6}`** ← ⭐ **49 题 ≥3，主战场** |
+| knowledge-update | 78 | `{2:78}` 全部恰好 2 个 |
 | temporal-reasoning | 133 | `{1:20, 2:88, 3:15, 4:2, 5:5, 6:3}` |
 | single-session ×3 | 156 | 全部 `{1: ...}` |
 
-全库 `{1:176, 2:250, 3:41, 4:19, 5:11, 6:3}` → **≥2 占 64.8%（324 题）**，≥3 占 14.8%。
+全库 `{1:176, 2:250, 3:41, 4:19, 5:11, 6:3}` → **≥2 占 64.8%（324 题）**
 
-**三点强过 LoCoMo**：
-1. ⭐ **证据是 session 级 + 稳定 ID**（`answer_xxx_1` / `_2`）—— **天然可拔除单元，不必自定义**
-2. **有 78 题明确的知识更新**（LoCoMo 一条都没有）
-3. **多证据比例更高**（64.8% vs 26.6%）
+⭐ **`multi-session` 是结构价值的主战场**：这类题**必须跨 session 聚合才答得出**，
+正是 Entity/Community 层该发挥作用的地方。单 session 题上结构价值先验就该是 0
+—— **这构成一个天然的负对照**，可用来验证我们的 φ 没有系统性高估结构。
 
-⭐ **决定性理由：三档同源同题，只有干扰 session 数不同**
-⇒ **记忆库规模是一个干净的自变量，题目本身不变。** 这是极难得的实验条件。
+**三档规模（实测）**：
 
-| 档 | 规模（实测） |
-|---|---|
-| `oracle` | 每题中位 **2 session / ~6.6k tok**，总 3.3M |
-| `s` | 均值 **47.7 session / ~122k tok**，总 61M（**18.5×**） |
-| `m` | ≈500 session，推断 ~603M tok |
+| 档 | 规模 | 相对 |
+|---|---|---|
+| `oracle` | 每题中位 **2 session / ~6.6k tok**，总 3.3M | 1× |
+| `s` | 均值 **47.7 session / ~122k tok**，总 61M | **18.5×** |
+| `m` | ≈500 session，推断 ~603M tok | ~180× |
+
+⭐ **题目本身不变，只有干扰 session 数变** —— 这是极难得的实验条件。
 
 ## 3. 实验设计
 
-### B1 · 可重放性验证（🔴 go/no-go，必须先做）
+### D1 · 🔴 可重放性验证（go/no-go，必须先做）
+
 ⚠️ **全仓库 `seed` 零命中**（实测 `grep -rn "seed" src/` = 空），
 只有 `temperature: 0`（`run_generation.py:210,366` / `evaluate_qa.py:108`）。
+**temperature=0 在托管 API 上不等于确定性** —— batching、路由、浮点非结合性都会漏噪声。
 
-- 同一输入重跑 N 次，测 **flip rate**
-- 若 flip rate 非零 → **必须自加 `seed=` 参数并重测**
-- ❌ **flip rate 压不下去，整个 φ 方案在这个宿主上悬空** —— 这一步不通过就不要往下做
+🔴 **为什么这是硬门槛**：Shapley 是**重叠子集之间做差**。
+若重跑噪声与真实边际贡献同量级，**两者在数学上无法区分**，所有 φ 作废。
 
-### B2 · 单元级 φ（oracle 档）
-- 单元 = session（用官方 `session_ids`）
-- **多证据题 324 条**为主战场；单证据题 φ 退化为 LOO，闭式算掉不采样
-- 采样预算全压到 ≥3 证据的 74 题
+`replay_check.py` 测 flip rate。判据：
+- `0` → GO
+- `≤1%` → GO，但必须证明 φ 效应量远超此噪声底，且写进 limitation
+- `>1%` → **NO-GO**，先补 seed 再测
 
-### B3 · ⭐ 主结果：代理偏差 vs 规模
-对每个单元同时记录：
-- `φ`（反事实，ground truth）
-- `recall_freq`（被检索器召回次数）
-- `recency`（保鲜度）
-- `hit_rate`（召回后答对率）← ⚠️ 这条**性质不同**，它带 outcome 反馈，是 observational 版本的 φ
+### D2 · 三档 × 三级消融（主结果）
 
-**测三档（oracle / s / m）上 `corr(proxy, φ)` 与偏差方向**，画成曲线。
+对 `oracle` / `s` / `m` 各跑 Experiment C 的四级阶梯
+（`L0_episodic_only` / `L0plus_dense` / `L1_entity_edge` / `L2_community`），
+画 **`Δ₁`、`Δ₂` vs 库规模** 曲线。
 
-⭐ **预期结论（若成立即为主卖点）**：
-**代理与 φ 的相关性随库增大而衰减** —— 也就是说，
-**统计代理在小库上还凑合，恰恰在最需要它的大库上失效。**
-这比「代理有偏」这个静态结论有力得多。
+⚠️ **必须带上 `L0plus_dense` 对照臂**：
+上游 `EpisodeSearchMethod` **只有 bm25，没有 cosine_similarity**
+（`graphiti_core/search/search_config.py:44-45` 实见）
+⇒ 朴素的 L1−L0 差值**混淆了「加了结构」和「加了稠密检索」两件事**。
+**`φ(L1) − φ(L0plus_dense)` 才是结构价值的保守估计。**
+只报朴素差值 = 高估自己的结果。
 
-### B4 · 成对对照
-78 题 knowledge-update **全部恰好 2 个证据** ⇒ 天然的成对对照组。
-⭐ **成对场景下我们的判据应与现有方法一致，集合级场景（multi-session 49 题 ≥3）才拉开差距。**
-这比单纯多跑一个数据集有说服力得多。
+### D3 · 负对照
+**single-session 156 题**：结构价值先验应 ≈ 0。
+若这里也测出显著正的 `Δ₁`，说明我们的 φ 有系统性偏置，**必须回头查**。
 
 ## 4. 工程
 
@@ -94,57 +95,47 @@
 
 | 项 | 结论 | 出处 |
 |---|---|---|
-| ✅ **可拔除** | 注入内容完全由 `haystack_dates / haystack_session_ids / haystack_sessions` 三个平行 list 决定 ⇒ **数据层预处理即可，0 行改 harness** | `run_generation.py:75-77, 92-96` |
-| ⚠️ **可重放存疑** | **全仓 `seed` 零命中**，只有 `temperature: 0` | 实测 grep |
+| ✅ **可拔除，0 行改 harness** | 注入内容完全由 `haystack_dates / haystack_session_ids / haystack_sessions` 三个平行 list 决定 ⇒ **数据层预处理即可** | `run_generation.py:75-77, 92-96` |
+| ⚠️ **可重放存疑** | 全仓 `seed` 零命中，只有 `temperature: 0` | 实测 grep |
 | ❌ **无 checkpoint** | 输出文件名带时间戳，异常静默 `continue` | `run_generation.py:376-378` |
-| judge | 按 question_type 分 5 套模板 + abstention 单独模板；后处理 `'yes' in resp.lower()` **很脆** | `evaluate_qa.py:24-43` |
+| judge 很脆 | `'yes' in resp.lower()` 会把 "yes, but actually no" 判对 | `evaluate_qa.py:24-43` |
 | memory 后端 | 只有 long-context 直灌 + BM25/contriever/stella/gte，**零第三方 memory 系统** | `src/retrieval/` |
 
-仓库规模：`src/` 共 **1937 行 / 15 个 py**。
+⭐ **正因为上游没有 memory 后端，我们才需要 Graphiti 当宿主** —— 两者互补，不冲突。
 
 ⚠️ **官方已迁至 `longmemeval-cleaned`（2025/09 清洗）** —— 早前统计基于旧 repo，
 **s/m 文件可能已不同，跑之前需重核**。
 
 📌 **可选**：`mem0ai/memory-benchmarks` 的 `benchmarks/longmemeval/run.py`（1413 行）
-自带 seed、续跑判断、异步并发，**比官方 harness 完善**，可考虑直接抄。
+自带 seed、续跑判断、异步并发，**比官方 harness 完善**。
 
 ### 我们要写的（全部在 `ssv_scale/` 下，零侵入）
 ```
 ssv_scale/
   PLAN.md            ← 本文件
-  replay_check.py    ⭐ B1：flip rate 测量（go/no-go）
-  build_units.py     session → Unit（id 用官方 session_id，稳定）
-  backend.py         backend(text, tag, tasks) -> {tid: {"hard","soft"}}
-  proxies.py         recall_freq / recency / hit_rate 埋点
-  run_phi.py         调 SSV 估计器
-  analyze_bias.py    B3 主图：corr(proxy, φ) vs 库规模
+  replay_check.py    ⭐ D1：flip rate（go/no-go），已写
+  export_for_graphiti.py  三档 -> Graphiti ingest 格式（一个问题 = 一个 group_id）
+  scale_curve.py     D2 主图：Δ₁/Δ₂ vs 库规模
 ```
 
-### ⭐ φ 引擎无需修改
-接口同 Experiment A：`backend(text, tag, tasks) -> {task_id: {"hard": float, "soft": float}}`。
-`RenderCachingEvaluator` 只做 render→hash→cache→backend。
-
-### ⚠️ 必须自建缓存
-上游无 checkpoint，而 Shapley 要反复评估重叠子集 ⇒
-**`ScoreCache` 必须落盘持久化，否则成本失控。**
+⭐ **φ 引擎与消融阶梯都在 graphiti fork 那边**，本 repo 只负责数据与规模。
 
 ## 5. 已知风险（不藏）
 
-1. 🔴 **B1 不通过整条线悬空** —— 见上，先做。
-2. **代理字段上游没有** —— `recall_freq / last_used / hit_count` 现有 harness **普遍缺失**，
-   需自行埋点，**应计入工程量**。
-3. **成本**：`s` 档 61M token，`m` 档 ~603M。Shapley 要跑多个子集 ⇒ **乘数很大**。
-   对策：φ 只在**受控子样本**上跑（比如 multi-session 的 49 题），不是全库。
-4. **judge 很脆** —— `'yes' in resp.lower()` 会把 "yes, but actually no" 判对。
-   **soft 分数不能直接用上游 judge，需自己实现并报告一致率。**
-5. ⚠️ **上下文预算混淆项** —— 「删了 session 成绩反而更好」有两种解释：
-   **它本身有害** vs **上下文短了模型表现更好**。不控制会把大量无辜记忆判成有害。
-   **对策：用 SSV 现成的双算子** `ρ_del`（真删）/ `ρ_pad`（占位但内容置空），
-   两者之差分离**内容价值**与**占位成本**。**这套在 memory 上比在 skill 上更有必要。**
+1. 🔴 **D1 不通过整条线悬空** —— 先做
+2. **成本**：`s` 档 61M token、`m` 档 ~603M，而 Shapley 要跑多个子集 ⇒ **乘数很大**。
+   **对策：φ 只在受控子样本上跑**（如 multi-session 的 49 题），不是全库。
+   且 Graphiti ingest 还要额外过 LLM 抽实体 —— **这是三个实验里最贵的一个**
+3. **judge 很脆** —— soft 分数不能直接用上游 judge，需自己实现并报告一致率
+4. ⚠️ **上下文预算混淆项** —— 「删了 session 成绩反而更好」有两种解释：
+   **它本身有害** vs **上下文短了模型表现更好**。
+   **对策：SSV 双算子** `ρ_del`（真删）/ `ρ_pad`（占位置空），`φ_pad − φ_del` 分离内容价值与占位成本
+5. **Community 在小库上可能建不起来** —— 聚类退化成一个巨类或全是单点类。
+   **必须报告每档的社区数与大小分布**，否则 `Δ₂` 无法解释
 
 ## 6. 下一步
 
-- [ ] **Step 0**：`replay_check.py`，测 flip rate（**go/no-go**）
-- [ ] Step 1：`build_units.py` + oracle 档 multi-session 49 题的 φ
-- [ ] Step 2：`proxies.py` 埋点（需要跑一遍检索器才有频次）
-- [ ] Step 3：B3 主图
+- [ ] **Step 0**：`replay_check.py` 测 flip rate（**go/no-go**）
+- [ ] Step 1：`export_for_graphiti.py`，oracle 档 multi-session 49 题
+- [ ] Step 2：接 graphiti fork 的 `ssv_structure/`，跑四级阶梯
+- [ ] Step 3：D2 规模曲线（oracle → s → m）
